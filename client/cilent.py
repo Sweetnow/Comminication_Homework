@@ -9,29 +9,43 @@ import copy
 import random
 import time
 
+# server监听地址
+server_addr = '127.0.0.1'
+# server监听端口
+server_port = 8999
 # 通信线程tcp每次接受的字节数
 tcp_bit = 1024
 # 通信编码
 tcp_coding = 'utf-8'
 
 
-def client_main(server_addr='127.0.0.1', server_port=8999):
+def client_main():
+    # 初始化state
     state = {'turn': 0, 'flag': 0, 'player_0': {'used': 0, 'remain': 0, 'score': 0}, 'player_1': {
         'used': 0, 'remain': 0, 'score': 0}}
-    control_dct = {'state': th.Lock(), 'next_turn': th.Event(),
+    # 多线程控制
+    control_dct = {'state': th.Lock(), 'next': th.Event(),
                    'stop': th.Event()}
-    msg_queue = queue.Queue(1)
+    '''
+    state - state的读写权限
+    next - tcp通知game进入下回合
+    stop - 通知各线程游戏结束
+    '''
+    msg_queue = queue.Queue()
+    # 游戏逻辑线程
     thread_game = th.Thread(target=game, args=(state, control_dct, msg_queue))
     thread_game.start()
+    # 连接服务器
     client = socket.socket()
     try:
         client.connect((server_addr, server_port))
     except:
         print('Error: cannot connect with server')
-        # 处理结束
         return
+    # 发送线程
     thread_recv = th.Thread(
         target=client_recv, args=(client, state, control_dct))
+    # 接收线程
     thread_send = th.Thread(target=client_send, args=(
         client, control_dct, msg_queue))
     thread_recv.start()
@@ -42,28 +56,31 @@ def client_main(server_addr='127.0.0.1', server_port=8999):
 
 
 def client_recv(sock, state, control_dct):
+    '''
+    接收server的回合信息并写入state
+    同时控制程序的结束
+    '''
     while True:
         data = b''
         while True:
             buffer = sock.recv(tcp_bit)
-            if buffer == b'' or buffer == b'{}':  # server 断开连接或退出
+            # server 断开连接(b'')或退出(b'{}')
+            if buffer == b'' or buffer == b'{}':
                 control_dct['stop'].set()
-                control_dct['next_turn'].set()
+                control_dct['next'].set()
                 return
             elif len(buffer) < tcp_bit:
                 data += buffer
                 break
             else:
                 data += buffer
-        if data == b'':
-            pass  # server 断开连接
-        else:
-            # 数据解析
+        # 数据解析
+        if data != b'':
             try:
                 msg_recv = json.loads(data.decode(tcp_coding))
             except:
                 print('Error: cannot load message from server')
-            # 数据解析
+            # 写入state
             control_dct['state'].acquire()
             try:
                 state['turn'] = msg_recv['turn']
@@ -73,12 +90,17 @@ def client_recv(sock, state, control_dct):
             except:
                 print('Error: incomplete message')
             control_dct['state'].release()
-            control_dct['next_turn'].set()
+            # 通知game进入下一回合
+            control_dct['next'].set()
 
 
 def client_send(sock, control_dct, msg_queue):
+    '''
+    发送所有来自game的消息
+    '''
     while True:
         msg = msg_queue.get()
+        # 检查程序是否结束
         if control_dct['stop'].isSet():
             sock.close()
             return
@@ -89,16 +111,22 @@ def client_send(sock, control_dct, msg_queue):
 
 
 def game(__state, control_dct, msg_queue):
+    '''
+    游戏逻辑处理
+    '''
     while True:
-        control_dct['next_turn'].wait()
-        control_dct['next_turn'].clear()
+        # 进入下回合
+        control_dct['next'].wait()
+        control_dct['next'].clear()
+        # 检查程序是否结束
         if control_dct['stop'].isSet():
             msg_queue.put({})
             return
+        # 复制state的副本
         control_dct['state'].acquire()
         state = copy.deepcopy(__state)
         control_dct['state'].release()
-
+        # 游戏逻辑部分
         p = random.random()
         used = 0
         if p < 0.5:
@@ -111,6 +139,7 @@ def game(__state, control_dct, msg_queue):
             print("enter endless loop")
             while True:
                 pass
+        # 发送消息
         msg = {'turn': state['turn']+1, 'used': used}
         msg_queue.put(msg)
 

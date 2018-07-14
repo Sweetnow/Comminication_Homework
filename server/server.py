@@ -24,7 +24,7 @@ tcp_coding = 'utf-8'
 # 起始筹码数
 game_coin = 1000
 # 最大回合数
-max_turn = 50
+max_turn = 100
 # 起始回合数-1(起始回合数为1)
 turn = 0 
 
@@ -35,7 +35,7 @@ def server_main():
     server.bind((server_addr, server_port))
     server.listen(2)
     count = 0
-    # 多线程控制模块
+    # 多线程控制
     control_dct = {'start': th.Event(), 'send': th.Event(), 'stop': th.Event(),
                    0: {'next': th.Lock(), 'recv': th.Event(), 'send': th.Event()},
                    1: {'next': th.Lock(), 'recv': th.Event(), 'send': th.Event()}}
