@@ -64,8 +64,9 @@ def client_recv(sock, state, control_dct):
         data = b''
         while True:
             buffer = sock.recv(tcp_bit)
-            # server 断开连接(b'')或退出(b'{}')
-            if buffer == b'' or buffer == b'{}':
+            # server 断开连接
+            if buffer == b'':
+                print('Error: cannot connect with server')
                 control_dct['stop'].set()
                 control_dct['next'].set()
                 return
@@ -80,15 +81,29 @@ def client_recv(sock, state, control_dct):
                 msg_recv = json.loads(data.decode(tcp_coding))
             except:
                 print('Error: cannot load message from server')
-            # 写入state
             control_dct['state'].acquire()
+            # 游戏已经结束
+            if 'winner' in msg_recv:
+                if msg_recv['winner'] == state['flag']:
+                    print('WON')
+                elif msg_recv['winner'] == 1-state['flag']:
+                    print('LOST')
+                elif msg_recv['winner']==-1:
+                    print('DRAW')
+                else:
+                    print('Error: incomplete/improper message')
+                control_dct['state'].release()
+                control_dct['stop'].set()
+                control_dct['next'].set()
+                return
+            # 写入state
             try:
                 state['turn'] = msg_recv['turn']
                 state['flag'] = msg_recv['flag']
                 state['player_0'] = msg_recv['player_0']
                 state['player_1'] = msg_recv['player_1']
             except:
-                print('Error: incomplete message')
+                print('Error: incomplete/improper message')
             control_dct['state'].release()
             # 通知game进入下一回合
             control_dct['next'].set()
@@ -131,7 +146,7 @@ def game(__state, control_dct, msg_queue):
         used = 0
         if p < 0.5:
             used = random.randint(0, 1000)
-        elif p < 0.9:
+        elif p < 1:
             sleep_time = random.uniform(0.5, 10)
             time.sleep(sleep_time)
             used = random.randint(0, 1000)

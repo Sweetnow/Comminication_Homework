@@ -24,9 +24,9 @@ tcp_coding = 'utf-8'
 # 起始筹码数
 game_coin = 1000
 # 最大回合数
-max_turn = 100
+max_turn = 50
 # 起始回合数-1(起始回合数为1)
-turn = 0 
+turn = 0
 
 
 def server_main():
@@ -99,7 +99,7 @@ def tcp(sock, control_dct, number, this_queue):
         print('Error: cannot send message to player_%d' % (number,))
     # 完成初始化消息发送
     control_dct[number]['send'].set()
-    # 进入主循环    
+    # 进入主循环
     control_dct['start'].wait()
     sock.setblocking(False)
     # 循环接受与发送消息
@@ -112,8 +112,10 @@ def tcp(sock, control_dct, number, this_queue):
         # 检查stop事件
         if control_dct['stop'].isSet():
             this_queue['recv'].put(msg_recv)
+            result = this_queue['send'].get()
             try:
-                sock.sendall(b'{}') # 通知client游戏结束
+                # 通知client游戏结束与结果
+                sock.sendall(bytes(json.dumps(result), encoding=tcp_coding))
             finally:
                 sock.close()
                 print('tcp %d closes' % (number,))
@@ -123,17 +125,17 @@ def tcp(sock, control_dct, number, this_queue):
             while True:
                 try:
                     buffer = sock.recv(tcp_bit)
-                except: # 未收到消息
+                except:  # 未收到消息
                     buffer = b''
                 if buffer == b'':
                     break
-                elif len(buffer) < tcp_bit: # 完成一次接收
+                elif len(buffer) < tcp_bit:  # 完成一次接收
                     data += buffer
                     break
-                else: # 未完全接收数据
+                else:  # 未完全接收数据
                     data += buffer
             # 检查是否收到消息
-            if data == b'': 
+            if data == b'':
                 time.sleep(tcp_sleep)
             else:
                 # 数据解析,获取收到的消息中最新的部分
@@ -231,16 +233,20 @@ def game(all_queue, control_dct):
         recv[1] = all_queue[1]['recv'].get()
         print('player', 0, recv[0])
         print('player', 1, recv[1])
-        # 检查游戏是否结束，结束则输出游戏结果
+        # 检查游戏是否结束，结束则输出游戏结果并通知client结果(-1为平局)
         if control_dct['stop'].isSet():
-            for i in range(2):
-                print('player_%d remains %d coins, Score: %d' %
-                      (i, state[i]['remain'], state[i]['score']))
+            result = {}
             if state[0]['score'] != state[1]['score']:
                 print('Winner is player_%d' %
                       (0 if state[0]['score'] > state[1]['score'] else 1,))
+                result['winner'] = 0 if state[0]['score'] > state[1]['score'] else 1
             else:
-                print('No Winner')
+                print('Draw')
+                result['winner'] = -1
+            for i in range(2):
+                all_queue[i]['send'].put(result)
+                print('player_%d remains %d coins, Score: %d' %
+                      (i, state[i]['remain'], state[i]['score']))
             return
         # 合法性检测
         used = {0: 0, 1: 0}
@@ -250,14 +256,14 @@ def game(all_queue, control_dct):
                 state[i]['remain'] -= used[i]
             else:
                 # debug
-                if len(recv[i]) == 0: # client未发送消息
+                if len(recv[i]) == 0:  # client未发送消息
                     pass
-                elif recv[i]['turn'] != turn: # 超时(消息跨回合)
+                elif recv[i]['turn'] != turn:  # 超时(消息跨回合)
                     print("Error: player_%d's turn is % d, server's turn is %d" % (
                         i, recv[i]['turn'], turn))
-                elif recv[i]['used'] > state[i]['remain']: # 下注超过现有钱数
+                elif recv[i]['used'] > state[i]['remain']:  # 下注超过现有钱数
                     print('player_%d used too many coins' % (i,))
-                elif recv[i]['used'] < 0: # 下注小于0
+                elif recv[i]['used'] < 0:  # 下注小于0
                     print('stupid player_%d used %d coin， less than 0' %
                           (i, recv[i]['used']))
         # 得分判定
